@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Whiteboard Lärare</title>
+    <title>WhiteBoard</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -83,6 +83,19 @@
         .bg-theme-dark .text-indigo-900 { color: #818cf8; }
 
         canvas { touch-action: none; }
+        
+        /* Protractor Styles */
+        .protractor {
+            cursor: move;
+            filter: drop-shadow(0 4px 6px rgba(0,0,0,0.1));
+            user-select: none;
+        }
+        .protractor-handle {
+            cursor: grab;
+        }
+        .protractor-handle:active {
+            cursor: grabbing;
+        }
     </style>
 </head>
 <body id="appBody" class="min-h-screen bg-theme-white text-slate-800 font-sans flex flex-col overflow-hidden transition-colors duration-300">
@@ -159,15 +172,25 @@
 
             <!-- VIEW: DRAWING CANVAS -->
             <div id="drawingContainer" class="hidden flex-1 bg-white rounded-xl shadow border border-gray-200 overflow-hidden relative flex flex-col">
-                <div class="p-2 border-b border-gray-200 flex items-center justify-between bg-gray-50 teacher-only">
+                <div class="p-2 border-b border-gray-200 flex items-center justify-between bg-gray-50 teacher-only overflow-x-auto">
                     <div class="flex items-center gap-2">
                         <!-- Tools -->
-                        <button onclick="setDrawTool('pen')" id="tool-pen" class="p-2 rounded hover:bg-gray-200 bg-gray-200"><i data-lucide="pen" class="w-4 h-4"></i></button>
+                        <button onclick="setDrawTool('pen')" id="tool-pen" class="p-2 rounded hover:bg-gray-200 bg-gray-200" title="Penna"><i data-lucide="pen" class="w-4 h-4"></i></button>
                         <div class="w-px h-6 bg-gray-300 mx-1"></div>
-                        <button onclick="setDrawTool('rect')" id="tool-rect" class="p-2 rounded hover:bg-gray-200"><i data-lucide="square" class="w-4 h-4"></i></button>
-                        <button onclick="setDrawTool('circle')" id="tool-circle" class="p-2 rounded hover:bg-gray-200"><i data-lucide="circle" class="w-4 h-4"></i></button>
-                        <button onclick="setDrawTool('triangle')" id="tool-triangle" class="p-2 rounded hover:bg-gray-200"><i data-lucide="triangle" class="w-4 h-4"></i></button>
+                        <button onclick="setDrawTool('rect')" id="tool-rect" class="p-2 rounded hover:bg-gray-200" title="Rektangel"><i data-lucide="square" class="w-4 h-4"></i></button>
+                        <button onclick="setDrawTool('circle')" id="tool-circle" class="p-2 rounded hover:bg-gray-200" title="Cirkel"><i data-lucide="circle" class="w-4 h-4"></i></button>
+                        <button onclick="setDrawTool('triangle')" id="tool-triangle" class="p-2 rounded hover:bg-gray-200" title="Likbent triangel"><i data-lucide="triangle" class="w-4 h-4"></i></button>
+                        <button onclick="setDrawTool('triangle-right')" id="tool-triangle-right" class="p-2 rounded hover:bg-gray-200 flex items-center justify-center font-bold text-[10px] w-8 h-8 border border-transparent" title="Rätvinklig triangel">
+                            <i data-lucide="triangle" class="w-4 h-4 transform rotate-90"></i>
+                        </button>
+                        
                         <div class="w-px h-6 bg-gray-300 mx-1"></div>
+                        
+                        <!-- Helpers -->
+                        <button onclick="toggleProtractor()" id="btn-protractor" class="p-2 rounded hover:bg-gray-200" title="Vinkellinjal (Gradskiva)"><i data-lucide="ruler" class="w-4 h-4"></i></button>
+
+                        <div class="w-px h-6 bg-gray-300 mx-1"></div>
+                        
                         <!-- Colors -->
                         <div class="flex gap-1">
                             <button onclick="setDrawColor('#000000')" class="w-6 h-6 rounded-full bg-black border border-gray-300 hover:scale-110 transition"></button>
@@ -184,6 +207,22 @@
                 </div>
                 <div class="relative flex-1 bg-white cursor-crosshair overflow-hidden" id="canvasWrapper">
                     <canvas id="whiteboardCanvas" class="absolute top-0 left-0 w-full h-full"></canvas>
+                    
+                    <!-- PROTRACTOR OVERLAY -->
+                    <div id="protractor" class="protractor hidden absolute z-50 w-[300px] h-[150px] origin-bottom" style="top: 100px; left: 100px;" onmousedown="startDragProtractor(event)" ondblclick="toggleProtractor()">
+                        <!-- SVG Protractor -->
+                        <svg viewBox="0 0 300 150" class="w-full h-full drop-shadow-xl">
+                            <path d="M 0 150 A 150 150 0 0 1 300 150 Z" fill="rgba(255, 255, 255, 0.9)" stroke="#333" stroke-width="2"/>
+                            <line x1="150" y1="150" x2="150" y2="140" stroke="#333" stroke-width="2"/> <!-- Center tick -->
+                            <!-- Ticks generated visually or simplified -->
+                            <g id="ticks" stroke="#555" stroke-width="1"></g>
+                            <circle cx="150" cy="150" r="5" fill="#333"/>
+                            
+                            <!-- Rotation Handle -->
+                            <circle cx="290" cy="140" r="8" fill="#ef4444" stroke="white" stroke-width="2" class="protractor-handle" onmousedown="startRotateProtractor(event)"/>
+                        </svg>
+                        <div class="absolute bottom-2 left-1/2 -translate-x-1/2 text-[10px] text-gray-500 font-bold pointer-events-none">Gradskiva</div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -375,7 +414,9 @@
             activeAssignmentId: null,
             activeDayForImage: null,
             activeDayForAssignment: null,
-            currentView: 'board' 
+            currentView: 'board',
+            // Protractor
+            protractor: { active: false, x: 100, y: 100, rotation: 0, isDragging: false, isRotating: false, lastX: 0, lastY: 0 }
         };
 
         let isStudentMode = false;
@@ -426,6 +467,8 @@
             renderTools(); 
             updateToolbarUI();
             initCanvas();
+            renderProtractorTicks();
+            setupProtractorEvents();
             lucide.createIcons();
         };
 
@@ -546,7 +589,7 @@
             tmp.width=canvas.width; tmp.height=canvas.height; tmp.getContext('2d').drawImage(canvas,0,0);
             canvas.width=p.clientWidth; canvas.height=p.clientHeight; ctx.drawImage(tmp,0,0); ctx.lineCap='round'; ctx.lineJoin='round';
         }
-        function setDrawTool(t) { state.drawing.tool=t; ['pen','rect','circle','triangle'].forEach(x=>document.getElementById('tool-'+x).classList.remove('bg-gray-300')); document.getElementById('tool-'+t).classList.add('bg-gray-300'); }
+        function setDrawTool(t) { state.drawing.tool=t; ['pen','rect','circle','triangle','triangle-right'].forEach(x=>document.getElementById('tool-'+x).classList.remove('bg-gray-300')); document.getElementById('tool-'+t).classList.add('bg-gray-300'); }
         function setDrawColor(c) { state.drawing.color=c; }
         
         function clearCanvas() { 
@@ -557,20 +600,155 @@
             }
         }
         
-        function startDrawing(e) { state.drawing.isDrawing=true; const r=canvas.getBoundingClientRect(); state.drawing.startX=e.clientX-r.left; state.drawing.startY=e.clientY-r.top; if(state.drawing.tool!=='pen') state.drawing.snapshot=ctx.getImageData(0,0,canvas.width,canvas.height); else { ctx.beginPath(); ctx.moveTo(state.drawing.startX, state.drawing.startY); } }
+        function startDrawing(e) { 
+            if(state.protractor.isDragging || state.protractor.isRotating) return; // Don't draw when moving tools
+            state.drawing.isDrawing=true; 
+            const r=canvas.getBoundingClientRect(); 
+            state.drawing.startX=e.clientX-r.left; 
+            state.drawing.startY=e.clientY-r.top; 
+            if(state.drawing.tool!=='pen') state.drawing.snapshot=ctx.getImageData(0,0,canvas.width,canvas.height); 
+            else { ctx.beginPath(); ctx.moveTo(state.drawing.startX, state.drawing.startY); } 
+        }
         function draw(e) {
-            if(!state.drawing.isDrawing) return; const r=canvas.getBoundingClientRect(); const x=e.clientX-r.left; const y=e.clientY-r.top;
-            ctx.lineWidth=state.drawing.lineWidth; ctx.strokeStyle=state.drawing.color; ctx.fillStyle=state.drawing.color;
-            if(state.drawing.tool==='pen') { ctx.lineTo(x,y); ctx.stroke(); }
-            else {
+            if(!state.drawing.isDrawing) return; 
+            const r=canvas.getBoundingClientRect(); 
+            const x=e.clientX-r.left; 
+            const y=e.clientY-r.top;
+            ctx.lineWidth=state.drawing.lineWidth; 
+            ctx.strokeStyle=state.drawing.color; 
+            ctx.fillStyle=state.drawing.color;
+            
+            if(state.drawing.tool==='pen') { 
+                ctx.lineTo(x,y); ctx.stroke(); 
+            } else {
                 ctx.putImageData(state.drawing.snapshot,0,0); ctx.beginPath();
-                if(state.drawing.tool==='rect') ctx.rect(state.drawing.startX,state.drawing.startY,x-state.drawing.startX,y-state.drawing.startY);
-                else if(state.drawing.tool==='circle') { const rad=Math.sqrt(Math.pow(x-state.drawing.startX,2)+Math.pow(y-state.drawing.startY,2)); ctx.arc(state.drawing.startX,state.drawing.startY,rad,0,2*Math.PI); }
-                else if(state.drawing.tool==='triangle') { ctx.moveTo(state.drawing.startX,state.drawing.startY); ctx.lineTo(x,y); ctx.lineTo(state.drawing.startX-(x-state.drawing.startX),y); ctx.closePath(); }
+                if(state.drawing.tool==='rect') {
+                    ctx.rect(state.drawing.startX,state.drawing.startY,x-state.drawing.startX,y-state.drawing.startY);
+                } else if(state.drawing.tool==='circle') { 
+                    const rad=Math.sqrt(Math.pow(x-state.drawing.startX,2)+Math.pow(y-state.drawing.startY,2)); 
+                    ctx.arc(state.drawing.startX,state.drawing.startY,rad,0,2*Math.PI); 
+                } else if(state.drawing.tool==='triangle') { 
+                    ctx.moveTo(state.drawing.startX,state.drawing.startY); 
+                    ctx.lineTo(x,y); 
+                    ctx.lineTo(state.drawing.startX-(x-state.drawing.startX),y); 
+                    ctx.closePath(); 
+                } else if(state.drawing.tool==='triangle-right') {
+                    // Right-angled triangle drawing logic
+                    ctx.moveTo(state.drawing.startX, state.drawing.startY);
+                    ctx.lineTo(state.drawing.startX, y); // Vertical
+                    ctx.lineTo(x, y); // Horizontal
+                    ctx.closePath();
+                }
                 ctx.stroke();
             }
         }
         function stopDrawing() { if(state.drawing.isDrawing) { state.drawing.isDrawing=false; ctx.closePath(); } }
+
+        // --- PROTRACTOR LOGIC ---
+        function toggleProtractor() {
+            const p = document.getElementById('protractor');
+            const btn = document.getElementById('btn-protractor');
+            state.protractor.active = !state.protractor.active;
+            
+            if (state.protractor.active) {
+                p.classList.remove('hidden');
+                btn.classList.add('bg-gray-300');
+            } else {
+                p.classList.add('hidden');
+                btn.classList.remove('bg-gray-300');
+            }
+        }
+
+        function renderProtractorTicks() {
+            const g = document.getElementById('ticks');
+            // Draw ticks for 180 degrees
+            for (let i = 0; i <= 180; i += 10) {
+                const rad = (i * Math.PI) / 180;
+                // Outer radius is 150.
+                const x1 = 150 + 140 * Math.cos(Math.PI + rad); // Start slightly inward
+                const y1 = 150 + 140 * Math.sin(Math.PI + rad);
+                const x2 = 150 + 150 * Math.cos(Math.PI + rad); // Edge
+                const y2 = 150 + 150 * Math.sin(Math.PI + rad);
+                
+                const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                line.setAttribute("x1", x1);
+                line.setAttribute("y1", y1);
+                line.setAttribute("x2", x2);
+                line.setAttribute("y2", y2);
+                line.setAttribute("stroke", "#333");
+                line.setAttribute("stroke-width", i % 45 === 0 ? "2" : "1");
+                g.appendChild(line);
+
+                // Numbers
+                if (i % 30 === 0 && i !== 0 && i !== 180) {
+                    const tx = 150 + 125 * Math.cos(Math.PI + rad);
+                    const ty = 150 + 125 * Math.sin(Math.PI + rad);
+                    const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                    text.setAttribute("x", tx);
+                    text.setAttribute("y", ty);
+                    text.setAttribute("text-anchor", "middle");
+                    text.setAttribute("dominant-baseline", "middle");
+                    text.setAttribute("fill", "#666");
+                    text.setAttribute("font-size", "10");
+                    text.textContent = i;
+                    // Fix text rotation to be readable? Nah, straightforward is fine for simple tool.
+                    g.appendChild(text);
+                }
+            }
+        }
+
+        function setupProtractorEvents() {
+            const p = document.getElementById('protractor');
+            
+            window.addEventListener('mousemove', (e) => {
+                if (state.protractor.isDragging) {
+                    e.preventDefault();
+                    const dx = e.clientX - state.protractor.lastX;
+                    const dy = e.clientY - state.protractor.lastY;
+                    state.protractor.x += dx;
+                    state.protractor.y += dy;
+                    p.style.left = state.protractor.x + 'px';
+                    p.style.top = state.protractor.y + 'px';
+                    state.protractor.lastX = e.clientX;
+                    state.protractor.lastY = e.clientY;
+                } else if (state.protractor.isRotating) {
+                    e.preventDefault();
+                    // Calculate angle from center of protractor
+                    // Center is current X + 150, current Y + 150
+                    // Actually origin-bottom means pivot is at bottom center (150, 150 inside div)
+                    // Visual center on screen:
+                    const rect = p.getBoundingClientRect();
+                    const centerX = rect.left + rect.width / 2;
+                    const centerY = rect.top + rect.height; // Pivot is bottom center
+                    
+                    const mouseX = e.clientX;
+                    const mouseY = e.clientY;
+                    
+                    const angleRad = Math.atan2(mouseY - centerY, mouseX - centerX);
+                    const angleDeg = angleRad * (180 / Math.PI) + 90; // Adjust offset
+                    
+                    state.protractor.rotation = angleDeg;
+                    p.style.transform = `rotate(${angleDeg}deg)`;
+                }
+            });
+
+            window.addEventListener('mouseup', () => {
+                state.protractor.isDragging = false;
+                state.protractor.isRotating = false;
+            });
+        }
+
+        function startDragProtractor(e) {
+            if (e.target.classList.contains('protractor-handle')) return; // Let rotate handle take over
+            state.protractor.isDragging = true;
+            state.protractor.lastX = e.clientX;
+            state.protractor.lastY = e.clientY;
+        }
+
+        function startRotateProtractor(e) {
+            e.stopPropagation();
+            state.protractor.isRotating = true;
+        }
 
         // --- TOOLS ---
         function toggleTool(t) { state.activeTools[t] = !state.activeTools[t]; updateToolbarUI(); renderTools(); }

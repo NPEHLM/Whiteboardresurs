@@ -214,7 +214,7 @@
                         <svg viewBox="0 0 300 150" class="w-full h-full drop-shadow-xl">
                             <path d="M 0 150 A 150 150 0 0 1 300 150 Z" fill="rgba(255, 255, 255, 0.9)" stroke="#333" stroke-width="2"/>
                             <line x1="150" y1="150" x2="150" y2="140" stroke="#333" stroke-width="2"/> <!-- Center tick -->
-                            <!-- Ticks generated visually or simplified -->
+                            <!-- Ticks generated visually -->
                             <g id="ticks" stroke="#555" stroke-width="1"></g>
                             <circle cx="150" cy="150" r="5" fill="#333"/>
                             
@@ -262,6 +262,10 @@
         <button onclick="toggleTool('groups')" id="btn-groups" class="tool-btn-inactive flex flex-col items-center gap-1 px-6 py-2 rounded-xl transition-all duration-200">
             <i data-lucide="users" class="w-6 h-6"></i>
             <span class="text-xs font-bold">Grupper</span>
+        </button>
+        <button onclick="toggleTool('polls')" id="btn-polls" class="tool-btn-inactive flex flex-col items-center gap-1 px-6 py-2 rounded-xl transition-all duration-200">
+            <i data-lucide="bar-chart-3" class="w-6 h-6"></i>
+            <span class="text-xs font-bold">Omröstning</span>
         </button>
         <button onclick="toggleTool('resources')" id="btn-resources" class="tool-btn-inactive flex flex-col items-center gap-1 px-6 py-2 rounded-xl transition-all duration-200">
             <i data-lucide="paperclip" class="w-6 h-6"></i>
@@ -400,15 +404,16 @@
             dayResources: {},
             dayImages: {},
             globalResources: [],
-            activeTools: { timer: false, dice: false, groups: false, resources: false },
+            activeTools: { timer: false, dice: false, groups: false, polls: false, resources: false },
             settings: { theme: 'bg-theme-white' },
             settingsOpen: false,
             // Drawing
             drawing: { tool: 'pen', color: '#000000', lineWidth: 2, isDrawing: false, startX: 0, startY: 0, snapshot: null },
             // Tools
-            timer: { mode: 'timer', time: 0, isRunning: false, inputMinutes: 5, intervalId: null },
+            timer: { mode: 'timer', time: 0, isRunning: false, inputMinutes: 5, intervalId: null, display: 'digital' },
             dice: { count: 1, results: [1], isRolling: false },
             groups: { names: '', count: 2, result: [], generated: false },
+            polls: { question: '', options: [{text: 'Ja', count: 0}, {text: 'Nej', count: 0}], editing: true },
             // UI Temp
             activeDayForResource: null,
             activeAssignmentId: null,
@@ -452,6 +457,7 @@
                     state.dayResources = decoded.dayResources;
                     state.dayImages = decoded.dayImages || {};
                     state.settings = decoded.settings || { theme: 'bg-theme-white' };
+                    state.polls = decoded.polls || state.polls;
                     state.globalResources = []; 
                     isStudentMode = true;
                     enableStudentMode(decoded.expiry);
@@ -488,6 +494,7 @@
             if(localStorage.getItem('dayImages')) state.dayImages = JSON.parse(localStorage.getItem('dayImages'));
             if(localStorage.getItem('globalResources')) state.globalResources = JSON.parse(localStorage.getItem('globalResources'));
             if(localStorage.getItem('appSettings')) state.settings = JSON.parse(localStorage.getItem('appSettings'));
+            if(localStorage.getItem('polls')) state.polls = JSON.parse(localStorage.getItem('polls'));
         }
         function renderHeaderDate() { document.getElementById('currentDate').textContent = new Date().toLocaleDateString('sv-SE', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }); }
 
@@ -563,14 +570,7 @@
         function openAssignmentModal(d) { state.activeDayForAssignment=d; document.getElementById('assignmentModal').classList.remove('hidden'); document.getElementById('assignText').focus(); }
         function closeAssignmentModal() { document.getElementById('assignmentModal').classList.add('hidden'); document.getElementById('assignText').value=''; state.activeDayForAssignment=null; }
         function handleAssignmentSubmit(e) { e.preventDefault(); const t=document.getElementById('assignText').value; if(t&&state.activeDayForAssignment){ if(!state.assignments[state.activeDayForAssignment])state.assignments[state.activeDayForAssignment]=[]; state.assignments[state.activeDayForAssignment].push({id:Date.now(),text:t,links:[]}); localStorage.setItem('assignments',JSON.stringify(state.assignments)); renderBoard(); } closeAssignmentModal(); }
-        
-        function deleteAssignment(d,id) { 
-            showConfirm('Ta bort uppdraget?', () => {
-                state.assignments[d]=state.assignments[d].filter(a=>a.id!==id); 
-                localStorage.setItem('assignments',JSON.stringify(state.assignments)); 
-                renderBoard(); 
-            });
-        }
+        function deleteAssignment(d,id) { showConfirm('Ta bort uppdraget?', () => { state.assignments[d]=state.assignments[d].filter(a=>a.id!==id); localStorage.setItem('assignments',JSON.stringify(state.assignments)); renderBoard(); }); }
 
         // --- DRAWING ---
         let canvas, ctx;
@@ -591,173 +591,30 @@
         }
         function setDrawTool(t) { state.drawing.tool=t; ['pen','rect','circle','triangle','triangle-right'].forEach(x=>document.getElementById('tool-'+x).classList.remove('bg-gray-300')); document.getElementById('tool-'+t).classList.add('bg-gray-300'); }
         function setDrawColor(c) { state.drawing.color=c; }
-        
-        function clearCanvas() { 
-            if(ctx) {
-                showConfirm("Vill du rensa hela ritytan?", () => {
-                    ctx.clearRect(0,0,canvas.width,canvas.height); 
-                });
-            }
-        }
-        
-        function startDrawing(e) { 
-            if(state.protractor.isDragging || state.protractor.isRotating) return; // Don't draw when moving tools
-            state.drawing.isDrawing=true; 
-            const r=canvas.getBoundingClientRect(); 
-            state.drawing.startX=e.clientX-r.left; 
-            state.drawing.startY=e.clientY-r.top; 
-            if(state.drawing.tool!=='pen') state.drawing.snapshot=ctx.getImageData(0,0,canvas.width,canvas.height); 
-            else { ctx.beginPath(); ctx.moveTo(state.drawing.startX, state.drawing.startY); } 
-        }
+        function clearCanvas() { if(ctx) { showConfirm("Vill du rensa hela ritytan?", () => { ctx.clearRect(0,0,canvas.width,canvas.height); }); } }
+        function startDrawing(e) { if(state.protractor.isDragging || state.protractor.isRotating) return; state.drawing.isDrawing=true; const r=canvas.getBoundingClientRect(); state.drawing.startX=e.clientX-r.left; state.drawing.startY=e.clientY-r.top; if(state.drawing.tool!=='pen') state.drawing.snapshot=ctx.getImageData(0,0,canvas.width,canvas.height); else { ctx.beginPath(); ctx.moveTo(state.drawing.startX, state.drawing.startY); } }
         function draw(e) {
-            if(!state.drawing.isDrawing) return; 
-            const r=canvas.getBoundingClientRect(); 
-            const x=e.clientX-r.left; 
-            const y=e.clientY-r.top;
-            ctx.lineWidth=state.drawing.lineWidth; 
-            ctx.strokeStyle=state.drawing.color; 
-            ctx.fillStyle=state.drawing.color;
-            
-            if(state.drawing.tool==='pen') { 
-                ctx.lineTo(x,y); ctx.stroke(); 
-            } else {
-                ctx.putImageData(state.drawing.snapshot,0,0); ctx.beginPath();
-                if(state.drawing.tool==='rect') {
-                    ctx.rect(state.drawing.startX,state.drawing.startY,x-state.drawing.startX,y-state.drawing.startY);
-                } else if(state.drawing.tool==='circle') { 
-                    const rad=Math.sqrt(Math.pow(x-state.drawing.startX,2)+Math.pow(y-state.drawing.startY,2)); 
-                    ctx.arc(state.drawing.startX,state.drawing.startY,rad,0,2*Math.PI); 
-                } else if(state.drawing.tool==='triangle') { 
-                    ctx.moveTo(state.drawing.startX,state.drawing.startY); 
-                    ctx.lineTo(x,y); 
-                    ctx.lineTo(state.drawing.startX-(x-state.drawing.startX),y); 
-                    ctx.closePath(); 
-                } else if(state.drawing.tool==='triangle-right') {
-                    // Right-angled triangle drawing logic
-                    ctx.moveTo(state.drawing.startX, state.drawing.startY);
-                    ctx.lineTo(state.drawing.startX, y); // Vertical
-                    ctx.lineTo(x, y); // Horizontal
-                    ctx.closePath();
-                }
-                ctx.stroke();
-            }
+            if(!state.drawing.isDrawing) return; const r=canvas.getBoundingClientRect(); const x=e.clientX-r.left; const y=e.clientY-r.top;
+            ctx.lineWidth=state.drawing.lineWidth; ctx.strokeStyle=state.drawing.color; ctx.fillStyle=state.drawing.color;
+            if(state.drawing.tool==='pen') { ctx.lineTo(x,y); ctx.stroke(); } else { ctx.putImageData(state.drawing.snapshot,0,0); ctx.beginPath(); if(state.drawing.tool==='rect') ctx.rect(state.drawing.startX,state.drawing.startY,x-state.drawing.startX,y-state.drawing.startY); else if(state.drawing.tool==='circle') { const rad=Math.sqrt(Math.pow(x-state.drawing.startX,2)+Math.pow(y-state.drawing.startY,2)); ctx.arc(state.drawing.startX,state.drawing.startY,rad,0,2*Math.PI); } else if(state.drawing.tool==='triangle') { ctx.moveTo(state.drawing.startX,state.drawing.startY); ctx.lineTo(x,y); ctx.lineTo(state.drawing.startX-(x-state.drawing.startX),y); ctx.closePath(); } else if(state.drawing.tool==='triangle-right') { ctx.moveTo(state.drawing.startX, state.drawing.startY); ctx.lineTo(state.drawing.startX, y); ctx.lineTo(x, y); ctx.closePath(); } ctx.stroke(); }
         }
         function stopDrawing() { if(state.drawing.isDrawing) { state.drawing.isDrawing=false; ctx.closePath(); } }
 
-        // --- PROTRACTOR LOGIC ---
-        function toggleProtractor() {
-            const p = document.getElementById('protractor');
-            const btn = document.getElementById('btn-protractor');
-            state.protractor.active = !state.protractor.active;
-            
-            if (state.protractor.active) {
-                p.classList.remove('hidden');
-                btn.classList.add('bg-gray-300');
-            } else {
-                p.classList.add('hidden');
-                btn.classList.remove('bg-gray-300');
-            }
-        }
-
-        function renderProtractorTicks() {
-            const g = document.getElementById('ticks');
-            // Draw ticks for 180 degrees
-            for (let i = 0; i <= 180; i += 10) {
-                const rad = (i * Math.PI) / 180;
-                // Outer radius is 150.
-                const x1 = 150 + 140 * Math.cos(Math.PI + rad); // Start slightly inward
-                const y1 = 150 + 140 * Math.sin(Math.PI + rad);
-                const x2 = 150 + 150 * Math.cos(Math.PI + rad); // Edge
-                const y2 = 150 + 150 * Math.sin(Math.PI + rad);
-                
-                const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-                line.setAttribute("x1", x1);
-                line.setAttribute("y1", y1);
-                line.setAttribute("x2", x2);
-                line.setAttribute("y2", y2);
-                line.setAttribute("stroke", "#333");
-                line.setAttribute("stroke-width", i % 45 === 0 ? "2" : "1");
-                g.appendChild(line);
-
-                // Numbers
-                if (i % 30 === 0 && i !== 0 && i !== 180) {
-                    const tx = 150 + 125 * Math.cos(Math.PI + rad);
-                    const ty = 150 + 125 * Math.sin(Math.PI + rad);
-                    const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
-                    text.setAttribute("x", tx);
-                    text.setAttribute("y", ty);
-                    text.setAttribute("text-anchor", "middle");
-                    text.setAttribute("dominant-baseline", "middle");
-                    text.setAttribute("fill", "#666");
-                    text.setAttribute("font-size", "10");
-                    text.textContent = i;
-                    // Fix text rotation to be readable? Nah, straightforward is fine for simple tool.
-                    g.appendChild(text);
-                }
-            }
-        }
-
-        function setupProtractorEvents() {
-            const p = document.getElementById('protractor');
-            
-            window.addEventListener('mousemove', (e) => {
-                if (state.protractor.isDragging) {
-                    e.preventDefault();
-                    const dx = e.clientX - state.protractor.lastX;
-                    const dy = e.clientY - state.protractor.lastY;
-                    state.protractor.x += dx;
-                    state.protractor.y += dy;
-                    p.style.left = state.protractor.x + 'px';
-                    p.style.top = state.protractor.y + 'px';
-                    state.protractor.lastX = e.clientX;
-                    state.protractor.lastY = e.clientY;
-                } else if (state.protractor.isRotating) {
-                    e.preventDefault();
-                    // Calculate angle from center of protractor
-                    // Center is current X + 150, current Y + 150
-                    // Actually origin-bottom means pivot is at bottom center (150, 150 inside div)
-                    // Visual center on screen:
-                    const rect = p.getBoundingClientRect();
-                    const centerX = rect.left + rect.width / 2;
-                    const centerY = rect.top + rect.height; // Pivot is bottom center
-                    
-                    const mouseX = e.clientX;
-                    const mouseY = e.clientY;
-                    
-                    const angleRad = Math.atan2(mouseY - centerY, mouseX - centerX);
-                    const angleDeg = angleRad * (180 / Math.PI) + 90; // Adjust offset
-                    
-                    state.protractor.rotation = angleDeg;
-                    p.style.transform = `rotate(${angleDeg}deg)`;
-                }
-            });
-
-            window.addEventListener('mouseup', () => {
-                state.protractor.isDragging = false;
-                state.protractor.isRotating = false;
-            });
-        }
-
-        function startDragProtractor(e) {
-            if (e.target.classList.contains('protractor-handle')) return; // Let rotate handle take over
-            state.protractor.isDragging = true;
-            state.protractor.lastX = e.clientX;
-            state.protractor.lastY = e.clientY;
-        }
-
-        function startRotateProtractor(e) {
-            e.stopPropagation();
-            state.protractor.isRotating = true;
-        }
+        // --- PROTRACTOR ---
+        function toggleProtractor() { const p=document.getElementById('protractor'); const btn=document.getElementById('btn-protractor'); state.protractor.active=!state.protractor.active; if(state.protractor.active){p.classList.remove('hidden');btn.classList.add('bg-gray-300');}else{p.classList.add('hidden');btn.classList.remove('bg-gray-300');} }
+        function renderProtractorTicks() { const g=document.getElementById('ticks'); for(let i=0;i<=180;i+=10){const rad=(i*Math.PI)/180; const x1=150+140*Math.cos(Math.PI+rad); const y1=150+140*Math.sin(Math.PI+rad); const x2=150+150*Math.cos(Math.PI+rad); const y2=150+150*Math.sin(Math.PI+rad); const line=document.createElementNS("http://www.w3.org/2000/svg","line"); line.setAttribute("x1",x1); line.setAttribute("y1",y1); line.setAttribute("x2",x2); line.setAttribute("y2",y2); line.setAttribute("stroke","#333"); line.setAttribute("stroke-width",i%45===0?"2":"1"); g.appendChild(line); if(i%30===0&&i!==0&&i!==180){const tx=150+125*Math.cos(Math.PI+rad); const ty=150+125*Math.sin(Math.PI+rad); const text=document.createElementNS("http://www.w3.org/2000/svg","text"); text.setAttribute("x",tx); text.setAttribute("y",ty); text.setAttribute("text-anchor","middle"); text.setAttribute("dominant-baseline","middle"); text.setAttribute("fill","#666"); text.setAttribute("font-size","10"); text.textContent=i; g.appendChild(text);}} }
+        function setupProtractorEvents() { const p=document.getElementById('protractor'); window.addEventListener('mousemove',(e)=>{if(state.protractor.isDragging){e.preventDefault(); const dx=e.clientX-state.protractor.lastX; const dy=e.clientY-state.protractor.lastY; state.protractor.x+=dx; state.protractor.y+=dy; p.style.left=state.protractor.x+'px'; p.style.top=state.protractor.y+'px'; state.protractor.lastX=e.clientX; state.protractor.lastY=e.clientY;}else if(state.protractor.isRotating){e.preventDefault(); const rect=p.getBoundingClientRect(); const cx=rect.left+rect.width/2; const cy=rect.top+rect.height; const angle=Math.atan2(e.clientY-cy,e.clientX-cx)*(180/Math.PI)+90; state.protractor.rotation=angle; p.style.transform=`rotate(${angle}deg)`;}}); window.addEventListener('mouseup',()=>{state.protractor.isDragging=false; state.protractor.isRotating=false;}); }
+        function startDragProtractor(e) { if(e.target.classList.contains('protractor-handle'))return; state.protractor.isDragging=true; state.protractor.lastX=e.clientX; state.protractor.lastY=e.clientY; }
+        function startRotateProtractor(e) { e.stopPropagation(); state.protractor.isRotating=true; }
 
         // --- TOOLS ---
         function toggleTool(t) { state.activeTools[t] = !state.activeTools[t]; updateToolbarUI(); renderTools(); }
         function closeAllTools() { for(let k in state.activeTools) state.activeTools[k]=false; updateToolbarUI(); renderTools(); }
         function updateToolbarUI() {
             document.getElementById('toolsSidebar').classList.toggle('hidden', !Object.values(state.activeTools).some(x=>x));
-            ['timer','dice','groups','resources'].forEach(t => {
+            ['timer','dice','groups','resources','polls'].forEach(t => {
                 const b = document.getElementById('btn-'+t);
-                b.className = state.activeTools[t] ? 'tool-btn-active flex flex-col items-center gap-1 px-6 py-2 rounded-xl transition-all duration-200' : 'tool-btn-inactive flex flex-col items-center gap-1 px-6 py-2 rounded-xl transition-all duration-200';
+                if(b) b.className = state.activeTools[t] ? 'tool-btn-active flex flex-col items-center gap-1 px-6 py-2 rounded-xl transition-all duration-200' : 'tool-btn-inactive flex flex-col items-center gap-1 px-6 py-2 rounded-xl transition-all duration-200';
             });
         }
         function renderTools() {
@@ -765,26 +622,144 @@
             if(state.activeTools.timer) c.appendChild(createTimerElement());
             if(state.activeTools.dice) c.appendChild(createDiceElement());
             if(state.activeTools.groups) c.appendChild(createGroupsElement());
+            if(state.activeTools.polls) c.appendChild(createPollsElement());
             if(state.activeTools.resources) c.appendChild(createResourcesElement());
             lucide.createIcons();
         }
 
-        // --- TIMER TOOL ---
+        // --- TIMER TOOL (OPTIMIZED) ---
         function createTimerElement() {
             const div = document.createElement('div'); div.className = "bg-white p-4 rounded-xl shadow-lg border-2 border-indigo-100 flex flex-col gap-4 animate-fade-in";
+            // Check state directly
             const min = Math.floor(state.timer.time/60); const sec = state.timer.time%60; const timeStr = `${min.toString().padStart(2,'0')}:${sec.toString().padStart(2,'0')}`;
             const isRed = state.timer.mode === 'countdown' && state.timer.time === 0;
+            
+            let displayContent = '';
+            if(state.timer.display === 'visual') {
+                const total = state.timer.mode==='countdown'?state.timer.inputMinutes*60:60; 
+                const pct = state.timer.mode==='countdown' ? Math.max(0,Math.min(1,state.timer.time/total)) : Math.max(0,Math.min(1,(state.timer.time%60)/60));
+                const c=2*Math.PI*90; const off=c*(1-pct);
+                let col='#22c55e'; if(pct<0.5)col='#eab308'; if(pct<0.2)col='#ef4444'; if(state.timer.mode!=='countdown')col='#3b82f6';
+                displayContent = `<div class="relative w-48 h-48 mx-auto flex items-center justify-center"><svg class="w-full h-full transform -rotate-90"><circle cx="50%" cy="50%" r="90" stroke="#e5e7eb" stroke-width="15" fill="none"/><circle id="timer-visual-circle" cx="50%" cy="50%" r="90" stroke="${col}" stroke-width="15" fill="none" stroke-dasharray="${c}" stroke-dashoffset="${off}" class="transition-all duration-1000 ease-linear"/></svg><div id="timer-visual-text" class="absolute text-2xl font-mono font-bold text-gray-700">${timeStr}</div></div>`;
+            } else {
+                displayContent = `<div class="text-center py-2"><div id="timer-digital-text" class="text-6xl font-mono font-bold tracking-wider ${isRed?'text-red-500':''}">${timeStr}</div></div>`;
+            }
+
             div.innerHTML = `
-                <div class="flex justify-between items-center border-b pb-2"><h3 class="font-bold text-indigo-800 flex items-center gap-2"><i data-lucide="clock" class="w-5 h-5"></i> Tidtagare</h3><div class="flex gap-2 text-sm bg-gray-100 p-1 rounded-lg"><button onclick="setTimerMode('timer')" class="px-3 py-1 rounded ${state.timer.mode==='timer'?'bg-indigo-600 text-white':'text-gray-600 hover:bg-gray-200'}">Upp</button><button onclick="setTimerMode('countdown')" class="px-3 py-1 rounded ${state.timer.mode==='countdown'?'bg-indigo-600 text-white':'text-gray-600 hover:bg-gray-200'}">Ner</button></div></div>
-                <div class="text-center py-2"><div class="text-6xl font-mono font-bold tracking-wider ${isRed?'text-red-500 animate-pulse':'text-gray-800'}">${timeStr}</div></div>
+                <div class="flex justify-between items-center border-b pb-2"><h3 class="font-bold text-indigo-800 flex items-center gap-2"><i data-lucide="clock" class="w-5 h-5"></i> Tidtagare</h3><div class="flex gap-2 text-sm items-center"><button onclick="toggleTimerDisplay()" class="p-1 rounded hover:bg-gray-200 text-gray-600"><i data-lucide="${state.timer.display==='visual'?'align-justify':'eye'}" class="w-4 h-4"></i></button><div class="flex gap-1 bg-gray-100 p-1 rounded-lg"><button onclick="setTimerMode('timer')" class="px-3 py-1 rounded ${state.timer.mode==='timer'?'bg-indigo-600 text-white':'text-gray-600 hover:bg-gray-200'}">Upp</button><button onclick="setTimerMode('countdown')" class="px-3 py-1 rounded ${state.timer.mode==='countdown'?'bg-indigo-600 text-white':'text-gray-600 hover:bg-gray-200'}">Ner</button></div></div></div>
+                ${displayContent}
                 ${state.timer.mode==='countdown'&&!state.timer.isRunning?`<div class="flex items-center justify-center gap-2"><button onclick="adjustTimerInput(-1)" class="p-2 hover:bg-gray-100 rounded-full"><i data-lucide="minus" class="w-4 h-4"></i></button><span class="font-bold w-16 text-center">${state.timer.inputMinutes} min</span><button onclick="adjustTimerInput(1)" class="p-2 hover:bg-gray-100 rounded-full"><i data-lucide="plus" class="w-4 h-4"></i></button><button onclick="resetTimer()" class="text-xs text-indigo-600 underline ml-2">Sätt</button></div>`:''}
                 <div class="flex justify-center gap-4"><button onclick="toggleTimer()" class="flex items-center gap-2 px-6 py-2 rounded-lg font-bold transition-colors ${state.timer.isRunning?'bg-amber-100 text-amber-700':'bg-green-100 text-green-700'}">${state.timer.isRunning?'<i data-lucide="pause" class="w-5 h-5"></i> Pausa':'<i data-lucide="play" class="w-5 h-5"></i> Starta'}</button><button onclick="resetTimer()" class="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 font-medium"><i data-lucide="rotate-ccw" class="w-5 h-5"></i> Noll</button></div>`;
             return div;
         }
+        function updateTimerUI() {
+            const min = Math.floor(state.timer.time/60); const sec = state.timer.time%60; const timeStr = `${min.toString().padStart(2,'0')}:${sec.toString().padStart(2,'0')}`;
+            if(state.timer.display === 'digital') {
+                const el = document.getElementById('timer-digital-text');
+                if(el) {
+                    el.innerText = timeStr;
+                    if(state.timer.mode === 'countdown' && state.timer.time === 0) el.classList.add('text-red-500'); else el.classList.remove('text-red-500');
+                }
+            } else {
+                const circle = document.getElementById('timer-visual-circle');
+                const text = document.getElementById('timer-visual-text');
+                if(circle && text) {
+                    text.innerText = timeStr;
+                    const total = state.timer.mode==='countdown'?state.timer.inputMinutes*60:60; 
+                    const pct = state.timer.mode==='countdown' ? Math.max(0,Math.min(1,state.timer.time/total)) : Math.max(0,Math.min(1,(state.timer.time%60)/60));
+                    const c=2*Math.PI*90; const off=c*(1-pct);
+                    let col='#22c55e'; if(pct<0.5)col='#eab308'; if(pct<0.2)col='#ef4444'; if(state.timer.mode!=='countdown')col='#3b82f6';
+                    circle.style.strokeDashoffset = off; circle.setAttribute('stroke', col);
+                }
+            }
+        }
         function setTimerMode(m){state.timer.mode=m; state.timer.isRunning=false; clearInterval(state.timer.intervalId); state.timer.time=m==='countdown'?state.timer.inputMinutes*60:0; renderTools();}
         function adjustTimerInput(d){state.timer.inputMinutes=Math.max(1,state.timer.inputMinutes+d); state.timer.time=state.timer.inputMinutes*60; renderTools();}
-        function toggleTimer(){if(state.timer.isRunning){clearInterval(state.timer.intervalId); state.timer.isRunning=false;}else{state.timer.isRunning=true; state.timer.intervalId=setInterval(()=>{if(state.timer.mode==='countdown'){if(state.timer.time>0)state.timer.time--;}else{state.timer.time++;}renderTools();},1000);}renderTools();}
+        function toggleTimer(){
+            if(state.timer.isRunning){clearInterval(state.timer.intervalId); state.timer.isRunning=false; renderTools();}
+            else{
+                state.timer.isRunning=true; 
+                renderTools(); // Render "Pause" button state immediately
+                state.timer.intervalId=setInterval(()=>{
+                    if(state.timer.mode==='countdown'){if(state.timer.time>0)state.timer.time--;}else{state.timer.time++;}
+                    updateTimerUI(); // Only update numbers/svg
+                },1000);
+            }
+        }
         function resetTimer(){state.timer.isRunning=false; clearInterval(state.timer.intervalId); state.timer.time=state.timer.mode==='countdown'?state.timer.inputMinutes*60:0; renderTools();}
+        function toggleTimerDisplay() { state.timer.display = state.timer.display === 'digital' ? 'visual' : 'digital'; renderTools(); }
+
+        // --- POLLS TOOL ---
+        function createPollsElement() {
+            const div = document.createElement('div'); div.className = "bg-white p-4 rounded-xl shadow-lg border-2 border-indigo-100 flex flex-col gap-4 animate-fade-in";
+            
+            let content = '';
+            if(state.polls.editing) {
+                content = `
+                    <div class="flex flex-col gap-2">
+                        <label class="text-xs font-bold text-gray-500 uppercase">Fråga</label>
+                        <input type="text" id="pollQuestion" value="${state.polls.question}" placeholder="Skriv fråga..." class="p-2 border rounded text-sm w-full">
+                        <label class="text-xs font-bold text-gray-500 uppercase mt-2">Alternativ</label>
+                        <div id="pollOptionsList" class="flex flex-col gap-2">
+                            ${state.polls.options.map((opt, i) => `
+                                <div class="flex gap-2">
+                                    <input type="text" value="${opt.text}" onchange="updatePollOption(${i}, this.value)" class="p-2 border rounded text-sm flex-1">
+                                    ${state.polls.options.length > 2 ? `<button onclick="removePollOption(${i})" class="text-red-500 hover:bg-red-50 p-2 rounded"><i data-lucide="trash" class="w-4 h-4"></i></button>` : ''}
+                                </div>
+                            `).join('')}
+                        </div>
+                        <button onclick="addPollOption()" class="text-indigo-600 text-sm font-bold flex items-center gap-1 mt-1 hover:underline"><i data-lucide="plus" class="w-3 h-3"></i> Lägg till alternativ</button>
+                        <button onclick="startPoll()" class="mt-4 bg-indigo-600 text-white font-bold py-2 rounded hover:bg-indigo-700">Starta omröstning</button>
+                    </div>
+                `;
+            } else {
+                const totalVotes = state.polls.options.reduce((sum, opt) => sum + opt.count, 0);
+                content = `
+                    <div class="flex flex-col gap-3">
+                        <h3 class="font-bold text-lg text-center text-indigo-900 border-b pb-2">${state.polls.question || 'Omröstning'}</h3>
+                        <div class="flex flex-col gap-4">
+                            ${state.polls.options.map((opt, i) => {
+                                const pct = totalVotes === 0 ? 0 : Math.round((opt.count / totalVotes) * 100);
+                                return `
+                                    <div class="flex flex-col gap-1">
+                                        <div class="flex justify-between text-sm font-medium">
+                                            <span>${opt.text}</span>
+                                            <span>${opt.count} (${pct}%)</span>
+                                        </div>
+                                        <div class="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden">
+                                            <div class="bg-indigo-600 h-2.5 rounded-full transition-all duration-500" style="width: ${pct}%"></div>
+                                        </div>
+                                        <div class="flex justify-end gap-2 mt-1">
+                                            <button onclick="votePoll(${i}, -1)" class="w-8 h-8 flex items-center justify-center border rounded hover:bg-gray-100" ${opt.count===0?'disabled':''}><i data-lucide="minus" class="w-3 h-3"></i></button>
+                                            <button onclick="votePoll(${i}, 1)" class="w-8 h-8 flex items-center justify-center bg-indigo-50 border border-indigo-200 text-indigo-700 rounded hover:bg-indigo-100"><i data-lucide="plus" class="w-3 h-3"></i></button>
+                                        </div>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                        <div class="flex gap-2 mt-4">
+                            <button onclick="editPoll()" class="flex-1 bg-gray-100 text-gray-700 font-bold py-2 rounded hover:bg-gray-200">Redigera</button>
+                            <button onclick="resetPoll()" class="flex-1 bg-red-50 text-red-600 font-bold py-2 rounded hover:bg-red-100">Nollställ</button>
+                        </div>
+                    </div>
+                `;
+            }
+
+            div.innerHTML = `
+                <div class="flex justify-between items-center border-b pb-2">
+                    <h3 class="font-bold text-indigo-800 flex items-center gap-2"><i data-lucide="bar-chart-3" class="w-5 h-5"></i> Omröstning</h3>
+                </div>
+                <div class="py-2">${content}</div>
+            `;
+            return div;
+        }
+        function updatePollOption(i, val) { state.polls.options[i].text = val; localStorage.setItem('polls', JSON.stringify(state.polls)); }
+        function addPollOption() { state.polls.options.push({text: `Alternativ ${state.polls.options.length+1}`, count: 0}); renderTools(); }
+        function removePollOption(i) { state.polls.options.splice(i, 1); renderTools(); }
+        function startPoll() { const q = document.getElementById('pollQuestion').value; if(q) state.polls.question = q; state.polls.editing = false; localStorage.setItem('polls', JSON.stringify(state.polls)); renderTools(); }
+        function editPoll() { state.polls.editing = true; renderTools(); }
+        function votePoll(i, delta) { state.polls.options[i].count = Math.max(0, state.polls.options[i].count + delta); localStorage.setItem('polls', JSON.stringify(state.polls)); renderTools(); }
+        function resetPoll() { state.polls.options.forEach(o => o.count = 0); localStorage.setItem('polls', JSON.stringify(state.polls)); renderTools(); }
 
         // --- DICE TOOL ---
         function createDiceElement() {
